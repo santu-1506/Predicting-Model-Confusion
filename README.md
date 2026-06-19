@@ -1,316 +1,158 @@
 # Predicting Model Confusion
 
-A meta-model that predicts when a base AI classifier is likely to be wrong.
+### A meta-model that learns when to trust (and when to second-guess) a classifier
 
-## Project Idea
+This repo builds a small "second opinion" model that sits on top of a normal image classifier. The base model still does the actual job of predicting cat vs dog vs whatever. The meta-model's only job is to look at how the base model behaved on a given input and decide: _should we trust this prediction, or should we flag it for a human to check?_
 
-Most machine learning classifiers give a prediction and a confidence score, but they can still be confidently wrong. This project builds a second small model, called a meta-model, whose job is to estimate whether the base model's prediction should be trusted.
+This README is split into two parts.
 
-The system has two parts:
+- **Part 1** is the why. It explains the problem in plain terms and walks through the research (mainly Tsiligkaridis, 2020) that backs up why this approach actually works.
+- **Part 2** is the how. It's the full build, step by step, from raw dataset to a working demo.
 
-1. **Base model**: a normal classifier that predicts the class of an input.
-2. **Meta-model**: a smaller binary classifier that predicts whether the base model's prediction is likely correct or wrong.
+---
 
-Example:
+## PART 1 — The Problem and the Theory
 
-```text
-Input image: dog
-Base model prediction: cat
-Base model confidence: 88%
-Meta-model trust score: 31%
-Final decision: defer to human
-```
+### 1.1 The core problem
 
-## Recommended Setup
+A classifier doesn't just output a label, it also outputs a confidence number (usually from softmax). The natural instinct is to trust the prediction when the confidence is high and doubt it when confidence is low. The problem is, that instinct is wrong more often than people expect.
 
-Use CIFAR-10 image classification for the first version.
+Neural networks are known to be **poorly calibrated**. They can be 95% confident about a wrong answer just as easily as a right one. This isn't a minor quirk, it's a well documented failure mode, and it's exactly the gap this project is trying to close.
+
+### 1.2 Why raw softmax confidence (MCP) isn't good enough
+
+The most common shortcut people use is **Maximum Class Probability (MCP)**: just take the highest softmax score and treat it as "how sure the model is." The paper explains why this is a flawed baseline:
+
+- Softmax inflates confidence by default, models tend to push probabilities toward 0 or 1 even when they have no business being that certain.
+- Because of this, MCP gives high scores even on inputs the model is about to get wrong, which makes it bad at actually _separating_ the correct predictions from the failures. That separation is the entire point of failure prediction, so a baseline that blurs it isn't useful on its own.
+
+This is the exact reason your project plan tells you to compare the meta-model against raw confidence as a baseline. If your meta-model can't beat plain softmax confidence, it isn't adding anything.
+
+### 1.3 A better signal: True Class Probability (TCP)
+
+The paper builds on earlier work (Corbiere et al., 2019) that proposes a different target: instead of asking "how confident was the model in whatever it predicted," ask "how much probability mass did the model actually put on the _correct_ class." This is called **True Class Probability (TCP)**.
+
+TCP is a much cleaner signal than MCP because it's tied to ground truth during training. The catch is obvious: at test time you don't know the true label, so you can't compute TCP directly. The whole trick is training a separate small network (or in your case, a separate small classifier) to _estimate_ what the TCP would have been, using only signals that are available at inference time, like confidence, entropy, margin between top classes, and embedding statistics.
+
+That's exactly your meta-model. It's a TCP estimator, just using gradient boosting / random forest instead of a neural confidence head.
+
+### 1.4 What the paper actually contributes (Dirichlet networks)
+
+The paper's main contribution is on the base model side, not the meta-model side. Instead of training a normal classifier with cross-entropy, it trains what's called an **Information Aware Dirichlet (IAD) network**. Rather than the network outputting a single probability per class, it outputs _concentration parameters_ of a Dirichlet distribution, basically a distribution over possible probability distributions. This lets the model express not just "what's my best guess" but "how much do I actually know here."
+
+The loss function is built so that:
+
+- the correct class concentration goes up when the model gets it right,
+- and critically, **incorrect classes are actively discouraged from getting high concentration**, which keeps the model from being overconfident on inputs it's about to mess up.
+
+The payoff, shown empirically across Fashion-MNIST, CIFAR-10, CIFAR-100, and Tiny-ImageNet: when you plot the TCP scores for correct vs incorrect predictions, IAD networks separate the two groups much more cleanly than a standard cross-entropy network. Errors cluster near zero confidence instead of bleeding into the high-confidence region. That separation is the entire game in failure prediction. The cleaner it is, the easier it becomes for any meta-model (constrained network, gradient boosting, whatever) to tell correct from incorrect.
+
+### 1.5 What this means for your project
+
+You're not training a Dirichlet network here, you're using a normal CNN/ResNet-18 base model, which is the right call for a first version (Dirichlet networks are a deeper rabbit hole and a CNN gets you a working pipeline much faster). But the paper still matters for your project in three concrete ways:
+
+1. **It validates the approach.** A peer-reviewed lab (MIT Lincoln Lab) is doing the exact same two-stage idea: base model + separate confidence/meta layer, with a documented track record of beating raw softmax confidence on the same kind of metrics you're using.
+2. **It tells you what "good" looks like.** The paper reports AUROC in the high 80s to low 90s and AUPRC-Error around 50 to 75 depending on dataset, for CIFAR-10 specifically, around 90-94 AUROC. That's your ballpark for what a working meta-model should land near. If you're way below that, something's off in your features or your calibration split.
+3. **It gives you an upgrade path.** Once your first version works (CNN + GradientBoosting meta-model), the next step described in the paper is exactly that: making the base model itself uncertainty-aware (Dirichlet style), so the meta-model has cleaner signal to work with in the first place.
+
+### 1.6 The bigger framing: selective prediction
+
+What you're building is part of a broader idea called **selective prediction** (sometimes "learning to defer" or "human-AI deferral"). The system is allowed to abstain. Instead of forcing an answer on every input, it can say "I'm not confident here, send this to a human or a more expensive model." This matters in any high-stakes setting (medical imaging, autonomous driving, fraud detection) where a wrong-but-confident answer is far more dangerous than an honest "I don't know."
+
+The risk-coverage curve (Part 2, Step 8) is the standard way to prove a selective prediction system actually works: as you reject more low-trust predictions, accuracy on what's left should keep climbing. That single curve is usually the headline result in any paper or project on this topic.
+
+---
+
+## PART 2 — The Build, Step by Step
+
+### 2.1 Setup
 
 ```text
 Dataset: CIFAR-10
-Base model: small CNN or ResNet-18
+Base model: small CNN (first version) or ResNet-18 (upgrade)
 Meta-model: GradientBoostingClassifier, RandomForestClassifier, or XGBoost
 Language: Python
 Libraries: PyTorch, torchvision, scikit-learn, pandas, numpy, matplotlib
 ```
 
-Why CIFAR-10:
+CIFAR-10 is the right starting dataset, it's small, standard, and every feature you need (confidence, entropy, margin, embeddings) is trivial to extract from it.
 
-- Small and easy to train.
-- Standard image classification benchmark.
-- Results are easy to visualize.
-- Confidence, entropy, margin, and embedding features are simple to extract.
-
-## Core Methodology
-
-Use a three-way split:
+### 2.2 The three-way split (this is the part people get wrong)
 
 ```text
-Base-train set     -> trains the base classifier
-Calibration set    -> creates training data for the meta-model
-Test set           -> final evaluation only
+Base-train set     -> trains the base classifier        (40,000 images)
+Calibration set    -> trains the meta-model              (10,000 images)
+Test set            -> final evaluation only              (10,000 images)
 ```
 
-This split is important. The meta-model must not be trained on the same samples that trained the base model, because the base model may look too confident on its own training data.
+The reason this split exists: if you train the meta-model on the same data the base model was trained on, the base model looks artificially confident and correct on almost everything (it's basically memorized it). The meta-model would learn a fantasy version of "when to trust the model" that falls apart on real unseen data. The calibration set has to be data the base model has never touched during training.
 
-Recommended CIFAR-10 split:
+### 2.3 Step-by-step workflow
+
+**Step 1 — Load and split**
+Load CIFAR-10 with `torchvision.datasets.CIFAR10`, split into `base_train`, `calibration`, `test`. Keep these three completely separate for the rest of the pipeline.
+
+**Step 2 — Train the base model**
+Train a small CNN first (get the pipeline working end to end), then upgrade to ResNet-18 adapted for CIFAR-10 if you have time. Only train on `base_train`. Track training loss, training accuracy, calibration accuracy, and test accuracy. Never let the base model see calibration or test data during training.
+
+**Step 3 — Run the base model on the calibration set**
+For every calibration image, record:
 
 ```text
-40,000 training images     -> base model training
-10,000 calibration images  -> meta-model training
-10,000 test images         -> final evaluation
+input image, true label, predicted class, full probability distribution,
+whether the prediction was correct, second-to-last-layer embedding
 ```
 
-## Final Workflow
+The correctness flag (1 = correct, 0 = wrong) becomes the label for the meta-model.
 
-### Step 1: Load and Split the Dataset
-
-Load CIFAR-10 using `torchvision.datasets.CIFAR10`.
-
-Create three datasets:
-
-```text
-base_train
-calibration
-test
-```
-
-The base model trains only on `base_train`.
-
-The calibration set is used only after the base model is trained.
-
-The test set stays untouched until the final evaluation.
-
-### Step 2: Train the Base Model
-
-Train a normal image classifier.
-
-Recommended first model:
-
-```text
-Small CNN
-```
-
-Better version if time allows:
-
-```text
-ResNet-18 adapted for CIFAR-10
-```
-
-Save the trained base model.
-
-Track:
-
-```text
-training loss
-training accuracy
-calibration accuracy
-test accuracy
-```
-
-Important rule:
-
-```text
-Do not train the base model on calibration or test data.
-```
-
-### Step 3: Run Base Model on Calibration Set
-
-For every calibration sample, collect:
-
-```text
-input image
-true label
-base model predicted class
-base model probability distribution
-whether the base prediction is correct
-second-to-last-layer embedding
-```
-
-The target label for the meta-model is:
-
-```text
-1 = base model prediction was correct
-0 = base model prediction was wrong
-```
-
-During this step, ground truth labels are used only to create the meta-model training labels.
-
-### Step 4: Extract Meta-Model Features
-
+**Step 4 — Extract meta-model features**
 For each calibration sample, compute:
 
 ```text
-max_softmax_probability
-entropy
-top1_top2_margin
-embedding_norm
-embedding_mean
-embedding_std
-predicted_class_id
+max_softmax_probability, entropy, top1_top2_margin,
+embedding_norm, embedding_mean, embedding_std, predicted_class_id
 ```
 
-Optional image-level features:
+Optional extras: image brightness/contrast/blur, or Monte Carlo dropout variance if you want a richer uncertainty signal.
+
+**Step 5 — Train the meta-model**
+Feed the feature vectors into a GradientBoostingClassifier (good first choice), with the correctness flag as the target. Output is a trust score between 0 and 1: closer to 1 means "probably trust this," closer to 0 means "probably don't."
+
+**Step 6 — Evaluate on the test set**
+Run the base model on the untouched test set, extract the same features, run them through the trained meta-model. Measure base model accuracy plus meta-model accuracy, precision, recall, F1, and ROC-AUC.
+
+**Step 7 — Compare against baselines**
+This is the step that proves your meta-model is worth having. Compare its trust score against raw confidence, entropy alone, and the top1-top2 margin alone. At minimum, beat raw confidence, that's the MCP baseline the paper in Part 1 also benchmarks against.
+
+**Step 8 — Risk-coverage curve (the headline result)**
+Sort test samples by trust score, then measure accuracy as you progressively reject the riskiest predictions:
 
 ```text
-image_brightness
-image_contrast
-image_blur_score
+Coverage    Meaning                    Accuracy
+100%        accept all                  78%
+90%         reject riskiest 10%         82%
+80%         reject riskiest 20%         86%
+70%         reject riskiest 30%         89%
+60%         reject riskiest 40%         92%
 ```
 
-Optional uncertainty feature:
+The claim you're proving: as you defer more of the risky predictions to a human, accuracy on what's left climbs. This is the core selective prediction result.
+
+**Step 9 — Break down failure types**
 
 ```text
-Monte Carlo dropout variance
+High trust + correct   -> the ideal case
+High trust + wrong     -> the dangerous case (this is what you most want to minimize)
+Low trust + correct    -> overly cautious, not dangerous but a bit wasteful
+Low trust + wrong      -> the meta-model did its job
 ```
 
-Example meta-model row:
+"High trust + wrong" is the category to obsess over. Every improvement to your features or your model should be judged by whether it shrinks this bucket.
 
-```text
-[confidence, entropy, margin, embedding_norm, embedding_mean, embedding_std] -> is_correct
-```
+**Step 10 — Build a small demo**
+For a handful of test samples, show: image, true label, base prediction, base confidence, meta trust score, final decision (accept/defer). This is the easiest way to make the project feel real in a presentation, people get it instantly when they see "model said cat, was actually a dog, and the meta-model correctly flagged it."
 
-Example:
-
-```text
-[0.93, 0.21, 0.71, 14.8, 0.12, 0.44] -> 1
-[0.58, 1.67, 0.04, 7.3, 0.03, 0.91] -> 0
-```
-
-### Step 5: Train the Meta-Model
-
-Train a small binary classifier.
-
-Recommended first choice:
-
-```text
-GradientBoostingClassifier from scikit-learn
-```
-
-Other good options:
-
-```text
-RandomForestClassifier
-LogisticRegression
-XGBoost
-Small 2-layer neural network
-```
-
-The meta-model input is the extracted feature vector.
-
-The meta-model output is a trust score:
-
-```text
-0.95 = base model is probably correct
-0.10 = base model is probably wrong
-```
-
-### Step 6: Evaluate on the Test Set
-
-Run the trained base model on the untouched test set.
-
-Extract the same features used for calibration.
-
-Run the trained meta-model on those features.
-
-Measure:
-
-```text
-Base model accuracy
-Meta-model accuracy
-Meta-model precision
-Meta-model recall
-Meta-model F1-score
-Meta-model ROC-AUC
-```
-
-The meta-model is not replacing the base classifier. It estimates whether the base classifier should be trusted.
-
-### Step 7: Compare Against Simple Baselines
-
-Compare the meta-model's trust score against simple uncertainty baselines:
-
-```text
-Raw confidence
-Entropy
-Top1-top2 margin
-```
-
-At minimum, compare against raw confidence.
-
-This is important because the project must show that the meta-model is better than simply trusting the softmax confidence score.
-
-### Step 8: Build Risk-Coverage Curve
-
-This is the most important evaluation.
-
-Sort test samples by trust score from highest to lowest.
-
-Then measure accuracy after accepting only the most trusted predictions.
-
-Example result table:
-
-```text
-Coverage    Meaning                         Accuracy
-100%        accept all predictions           78%
-90%         reject riskiest 10%              82%
-80%         reject riskiest 20%              86%
-70%         reject riskiest 30%              89%
-60%         reject riskiest 40%              92%
-```
-
-This shows whether the system can improve reliability by deferring uncertain predictions.
-
-Main claim:
-
-```text
-When the model rejects the riskiest predictions, accuracy on accepted predictions increases.
-```
-
-### Step 9: Analyze Failure Types
-
-Create a breakdown of predictions:
-
-```text
-High trust + correct    -> ideal accepted cases
-High trust + wrong      -> dangerous failures
-Low trust + correct     -> overly cautious rejections
-Low trust + wrong       -> successfully flagged failures
-```
-
-The most important category is:
-
-```text
-High confidence + wrong
-```
-
-These are the scary cases where the base model looks confident but makes a mistake.
-
-### Step 10: Build a Small Demo
-
-The demo should show individual examples from the test set.
-
-For each sample, display:
-
-```text
-image
-true label
-base model prediction
-base model confidence
-meta-model trust score
-final decision: accept or defer
-```
-
-Example:
-
-```text
-True label: dog
-Base prediction: cat
-Base confidence: 88%
-Meta trust score: 31%
-Decision: defer to human
-```
-
-## Suggested Project Structure
+### 2.4 Project structure
 
 ```text
 model-confusion-predictor/
@@ -333,122 +175,46 @@ model-confusion-predictor/
     tables/
 ```
 
-## Implementation Order
+### 2.5 Build order
 
-Build the project in this order:
+1. Dataset loading and three-way split
+2. Train base CNN on `base_train`
+3. Save and reload the base model
+4. Extract calibration features
+5. Train the meta-model
+6. Extract test features
+7. Evaluate base model and meta-model on test data
+8. Generate selective accuracy and risk-coverage plots
+9. Add example visualizations (accepted vs deferred predictions)
+10. Final report and demo
 
-1. Create dataset loading and three-way split.
-2. Train the base CNN on the base-train split.
-3. Save and reload the base model.
-4. Extract calibration features from the trained base model.
-5. Train the meta-model using calibration features.
-6. Extract test features.
-7. Evaluate base model and meta-model on test data.
-8. Generate selective accuracy and risk-coverage plots.
-9. Add example visualizations for accepted and deferred predictions.
-10. Prepare final report and demo.
-
-## Key Metrics
-
-Base model metrics:
+### 2.6 Key metrics, all in one place
 
 ```text
-accuracy
-loss
-confusion matrix
+Base model:        accuracy, loss, confusion matrix
+Meta-model:         accuracy, precision, recall, F1, ROC-AUC
+Selective prediction: coverage, risk, selective accuracy, risk-coverage curve
 ```
 
-Meta-model metrics:
+Definitions, since these get mixed up easily:
 
 ```text
-accuracy
-precision
-recall
-F1-score
-ROC-AUC
+coverage             = % of predictions accepted
+risk                 = error rate among accepted predictions
+selective accuracy   = accuracy among accepted predictions
 ```
 
-Selective prediction metrics:
+### 2.7 The important rule to remember when explaining this project
 
-```text
-coverage
-selective accuracy
-risk
-risk-coverage curve
-```
+During **training**, ground truth is used to label whether the base model was correct, that's how the meta-model learns. During **inference**, there is no ground truth available. The meta-model only ever sees confidence, entropy, margin, and embedding stats, it has never seen the true label at prediction time. If you get asked about this in a viva or interview, this is the line that shows you actually understand selective prediction instead of just running the code.
 
-Definitions:
+---
 
-```text
-coverage = percentage of predictions accepted
-risk = error rate among accepted predictions
-selective accuracy = accuracy among accepted predictions
-```
+## References (for the literature grounding in Part 1)
 
-## Expected Final Outputs
-
-The final project should produce:
-
-```text
-trained base classifier
-trained meta-model
-base model accuracy report
-meta-model classification report
-risk-coverage curve
-selective accuracy table
-confidence baseline comparison
-example predictions with accept/defer decisions
-```
-
-## Final Presentation Structure
-
-Use this structure for the project presentation:
-
-1. **Problem**
-   - AI models can be confidently wrong.
-   - We need a way to flag unreliable predictions.
-
-2. **Idea**
-   - Train a base classifier.
-   - Train a second model to predict whether the base classifier is likely correct.
-
-3. **Method**
-   - CIFAR-10 dataset.
-   - Base CNN classifier.
-   - Calibration set for meta-model training.
-   - Features: confidence, entropy, margin, embedding statistics.
-
-4. **Evaluation**
-   - Base accuracy.
-   - Meta-model ROC-AUC.
-   - Risk-coverage curve.
-   - Comparison with raw confidence baseline.
-
-5. **Results**
-   - Show selective accuracy improvement when deferring risky predictions.
-
-6. **Demo**
-   - Show accepted predictions.
-   - Show deferred predictions.
-   - Show high-confidence wrong cases.
-
-7. **Conclusion**
-   - A lightweight meta-model can help identify when another AI model may be unreliable.
-
-## Important Clarification
-
-During training:
-
-```text
-Ground truth labels are used to determine whether the base model was correct.
-```
-
-During inference:
-
-```text
-Ground truth is unavailable.
-The meta-model predicts trust using only the input-derived features and base model signals.
-```
-
-This distinction is important for explaining the project correctly.
-
+- Tsiligkaridis, T. (2020). _Failure Prediction by Confidence Estimation of Uncertainty-Aware Dirichlet Networks._ MIT Lincoln Laboratory.
+- Corbiere, C., Thome, N., Bar-Hen, A., Cord, M., Perez, P. (2019). _Addressing Failure Prediction by Learning Model Confidence._ NeurIPS.
+- Hendrycks, D., Gimpel, K. (2017). _A Baseline for Detecting Misclassified and Out-of-Distribution Examples in Neural Networks._ ICLR. (this is the MCP baseline referenced throughout)
+- Jiang, H., Kim, B., Guan, M., Gupta, M. (2018). _To Trust or Not to Trust a Classifier._ NeurIPS. (Trust Score method)
+- Sensoy, M., Kaplan, L., Kandemir, M. (2018). _Evidential Deep Learning to Quantify Classification Uncertainty._ NeurIPS.
+- Malinin, A., Gales, M. (2019). _Reverse KL-Divergence Training of Prior Networks._ NeurIPS.
