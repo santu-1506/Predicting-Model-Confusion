@@ -155,6 +155,8 @@ Create `src/train_meta.py` containing:
 
 When you run this step, you should see the training process for the Gradient Boosting model and some basic metrics (like Accuracy and ROC-AUC) on the test set.
 
+![alt text](image-2.png)
+
 ## Why This Step Matters
 
 This is the core of "Selective Prediction". This meta-model will output a "trust score" between 0 and 1 for any new image. A high score means "trust the base model," while a low score means "the base model is probably confused, defer to a human."
