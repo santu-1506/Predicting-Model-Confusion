@@ -168,25 +168,49 @@ This is the headline result of the project. The meta-model's line climbs above t
 
 ---
 
-## ⬜ Step 6 — Build the Interactive Demo
+## ✅ Step 6 — Build the Interactive Demo
 
-**Status:** Not started
+**Status:** Complete
 
 ### Goal
 
-Build a presentation-ready demo script (`src/demo.py`) that shows individual examples of the meta-model in action: the image, the base model's prediction, its confidence, and the meta-model's trust score — highlighting cases where the base model is wrong but the meta-model correctly flags it.
+Build a presentation-ready demo script (`src/demo.py`) that shows individual examples of the meta-model in action: the image, the base model's prediction, its confidence, and the meta-model's trust score.
 
-### Why This Step Matters
+### What Was Created
 
-Metrics like ROC-AUC and Risk-Coverage curves are great for data scientists, but an interactive demo is how you get normal people (and recruiters!) to instantly understand why the project is valuable.
+**`src/demo.py`** — Scans the test set for interesting examples and generates a visual grid displaying:
+1. Ideal cases (High Trust + Correct)
+2. Caught errors (Low Trust + Wrong)
+3. Missed errors (High Trust + Wrong)
+4. Overly cautious (Low Trust + Correct)
+
+![Demo Predictions](assets/demo_predictions.png)
 
 ---
 
-## ⬜ Next Steps — Improving the Meta-Model
+## ✅ Step 7 — Failure Analysis
 
-To beat the MCP baseline, the following improvements are planned:
+**Status:** Complete
 
-1. **Enrich the feature set** — add `max_softmax`, `entropy`, `top1_top2_margin`, `embedding_norm`, `embedding_mean`, `embedding_std`, `predicted_class_id` to the features passed to the meta-model
-2. **Upgrade the base model** — swap SimpleCNN for ResNet-18 to get higher base accuracy (~93%)
-3. **Build the demo** — `src/demo.py` showing accept/defer decisions on sample images
-4. **Failure type breakdown** — categorize predictions into the four quadrants (high trust + correct, high trust + wrong, etc.)
+### Goal
+
+Categorize all test predictions into the four quadrants mentioned above to see exactly how well the meta-model is catching errors.
+
+### What Was Created
+
+**`src/failure_analysis.py`** — Analyzes the 10,000 test predictions and generates a breakdown.
+
+**Key Result:** Only **2.9%** of predictions fall into the "Dangerous" category (where the base model was wrong, but the meta-model incorrectly trusted it anyway).
+
+![Failure Breakdown](assets/failure_breakdown.png)
+
+---
+
+## 🚀 Path to Production
+
+While the machine learning pipeline is complete, this project is currently a set of research scripts. To deploy this into a real-world production environment, you would need to add:
+
+1. **Inference API (`app.py`)**: Wrap the models in a FastAPI or Flask app that accepts an image via HTTP POST and returns a JSON response: `{"prediction": "dog", "trust_score": 0.85, "action": "ACCEPT"}`.
+2. **End-to-End Inference Pipeline**: Currently, features are extracted from PyTorch dataloaders in batch. You need a single function that takes one raw image, runs it through the base model, extracts the 263 features, and passes it to the `sklearn` meta-model in memory.
+3. **Containerization (`Dockerfile`)**: Create a Docker image containing the code, dependencies, and the saved `.pt` and `.pkl` model weights so it can be deployed to AWS/GCP.
+4. **Model Registry**: Instead of loading `models/meta_model.pkl` locally, fetch the latest models from an S3 bucket or MLflow registry.
