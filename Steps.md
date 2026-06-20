@@ -1,88 +1,30 @@
-# Step 1 - Load and Split the Dataset
+# 📋 Build Log — Step-by-Step Progress
 
-## Goal
+This document tracks the step-by-step implementation of the Predicting Model Confusion project. Each step includes the goal, what was created, and the results.
+
+---
+
+## ✅ Step 1 — Load and Split the Dataset
+
+**Status:** Complete
+
+### Goal
 
 Load the CIFAR-10 dataset and split it into three separate parts:
 
-```text
-base_train   -> used to train the base image classifier
-calibration  -> used to train the meta-model / trust model
-test         -> used only for final evaluation
-```
+| Split | Purpose | Size |
+|---|---|---|
+| `base_train` | Train the base image classifier | 40,000 images |
+| `calibration` | Train the meta-model / trust model | 10,000 images |
+| `test` | Final evaluation only | 10,000 images |
 
-The important rule is that the base model must never train on the calibration or test data.
+> **Important:** The base model must never train on the calibration or test data.
 
-## What to Create
+### What Was Created
 
-Create this file:
+**`src/data.py`** — handles downloading CIFAR-10, applying transforms, splitting the training set (with seed `42` for reproducibility), and returning three `DataLoader` objects.
 
-```text
-src/data.py
-```
-
-This file should handle:
-
-1. Downloading/loading CIFAR-10.
-2. Applying basic image transforms.
-3. Splitting the original CIFAR-10 training set into:
-   - `40,000` images for `base_train`
-   - `10,000` images for `calibration`
-4. Keeping the CIFAR-10 test set as the untouched final `test` set.
-5. Returning PyTorch `DataLoader` objects for all three sets.
-
-## Install Required Libraries
-
-Create a `requirements.txt` file with:
-
-```text
-torch
-torchvision
-scikit-learn
-pandas
-numpy
-matplotlib
-tqdm
-joblib
-```
-
-Then install them:
-
-```bash
-pip install -r requirements.txt
-```
-
-## Suggested Code Structure
-
-Inside `src/data.py`, create a function like:
-
-```python
-def get_dataloaders(batch_size=128, num_workers=2):
-    """
-    Returns:
-        base_train_loader
-        calibration_loader
-        test_loader
-    """
-```
-
-The split should look like this:
-
-```python
-base_train_size = 40000
-calibration_size = 10000
-
-base_train, calibration = random_split(
-    full_train_dataset,
-    [base_train_size, calibration_size],
-    generator=torch.Generator().manual_seed(42),
-)
-```
-
-Use a fixed random seed, such as `42`, so the split is reproducible.
-
-## Expected Output
-
-When Step 1 is complete, you should be able to run a quick check and see:
+### Output
 
 ```text
 Base-train images: 40000
@@ -90,129 +32,141 @@ Calibration images: 10000
 Test images: 10000
 ```
 
-## Why This Step Matters
+### Why This Step Matters
 
 The calibration set is used later to teach the meta-model when the base model is likely to be correct or wrong. If the base model trains on the calibration set, the meta-model will learn from unrealistic results and the final trust score will not be reliable.
 
 ---
 
-# Step 2 - Train the Base Model
+## ✅ Step 2 — Train the Base Model
 
-## Goal
+**Status:** Complete
+
+### Goal
 
 Train a small CNN base model exclusively on the `base_train` dataset. The base model must never see the `calibration` or `test` datasets during training.
 
-## What to Create
+### What Was Created
 
-Create `src/train_base.py` containing:
-1. A basic CNN architecture for CIFAR-10 (e.g., 2-3 conv layers, followed by fully connected layers).
-2. A training loop that runs for a few epochs (e.g., 10 epochs).
-3. Code to save the trained model weights to `models/base_model.pt`.
-![alt text](image.png)
+**`src/train_base.py`** — contains:
+- A 3-layer CNN architecture (`SimpleCNN`) for CIFAR-10 (Conv→ReLU→Pool ×3, followed by FC layers with Dropout)
+- A training loop running for 10 epochs with Adam optimizer (lr=0.001)
+- Model weights saved to `models/base_model.pt`
 
----
+### Training Results
 
-# Step 3 - Extract Features & Generate Meta-Model Data
-
-## Goal
-
-Run the trained base model on the `calibration` and `test` datasets to see where it succeeds and where it fails. We will extract its internal features (embeddings) and record whether its predictions were correct or incorrect. This information will form the dataset used to train our trust/meta-model.
-
-## What to Create
-
-Create `src/extract_features.py` containing:
-1. Code to load the trained `models/base_model.pt`.
-2. A function that runs the model over the `calibration` and `test` dataloaders.
-3. For each image, save:
-   - The intermediate features/embeddings from the base model (e.g., from the second-to-last layer).
-   - A binary label `is_correct` (1 if the base model's prediction was right, 0 if wrong).
-4. Save the extracted features and labels into a format suitable for training the meta-model (e.g., NumPy `.npy` files or PyTorch `.pt` files in a `data/extracted/` directory).
-
-![alt text](image-1.png)
-
-## Why This Step Matters
-
-The meta-model needs to learn the patterns of when the base model is likely to be confused. By looking at the base model's internal embeddings and whether it ultimately got the answer right or wrong on the calibration set, the meta-model can predict "trust scores" for new, unseen data in the test set.
+| Epoch | Loss | Accuracy |
+|---|---|---|
+| 1 | 1.7320 | 36.10% |
+| 2 | 1.4054 | 48.90% |
+| 5 | 1.0460 | 63.12% |
+| 8 | 0.8910 | 68.88% |
+| 10 | 0.8180 | **71.44%** |
 
 ---
 
-# Step 4 - Train the Meta-Model
+## ✅ Step 3 — Extract Features & Generate Meta-Model Data
 
-## Goal
+**Status:** Complete
 
-Train a secondary model (the "meta-model" or "trust model") to predict whether the base model's classification is correct or incorrect. We will use a Gradient Boosting Classifier from `scikit-learn` to learn from the internal features we extracted in Step 3.
+### Goal
 
-## What to Create
+Run the trained base model on the `calibration` and `test` datasets to extract its internal features (embeddings) and record whether each prediction was correct or incorrect. This data becomes the training set for the meta-model.
 
-Create `src/train_meta.py` containing:
-1. Code to load the extracted features and labels from the `data/extracted/` directory (specifically the `calibration` set).
-2. Initialization of a `GradientBoostingClassifier` (or `RandomForestClassifier`).
-3. Training the classifier on the calibration features, with the target being the `is_correct` labels.
-4. Evaluation of the meta-model on the test features (to see how well it predicts the base model's successes and failures on unseen data).
-5. Saving the trained meta-model weights to `models/meta_model.pkl` using `joblib`.
+### What Was Created
 
-## Expected Output
+**`src/extract_features.py`** — for each image, extracts:
+- The 256-dimensional embedding from the second-to-last layer of the CNN
+- A binary label `is_correct` (1 = base model got it right, 0 = wrong)
 
-When you run this step, you should see the training process for the Gradient Boosting model and some basic metrics (like Accuracy and ROC-AUC) on the test set.
+### Output
 
-![alt text](image-2.png)
+```text
+Saved calibration features: torch.Size([10000, 256]), labels: torch.Size([10000])
+Saved test features:        torch.Size([10000, 256]), labels: torch.Size([10000])
+```
 
-## Why This Step Matters
+Files saved to `data/extracted/`:
+- `calibration_features.pt`, `calibration_labels.pt`
+- `test_features.pt`, `test_labels.pt`
 
-This is the core of "Selective Prediction". This meta-model will output a "trust score" between 0 and 1 for any new image. A high score means "trust the base model," while a low score means "the base model is probably confused, defer to a human."
+### Why This Step Matters
 
----
-
-# Step 5 - Evaluate Selective Prediction (Risk-Coverage Curve)
-
-## Goal
-
-Now that we have a trained meta-model that predicts "trust scores," we need to prove that it actually works. We will compare our meta-model's trust scores against a simple baseline (raw softmax confidence, also known as Maximum Class Probability or MCP). 
-The headline result will be a **Risk-Coverage Curve**: a plot showing that as we reject the "riskiest" predictions (according to our trust score), the accuracy of the remaining predictions increases!
-
-## What to Create
-
-Create `src/evaluate.py` containing:
-1. Code to load the `test` dataset, the trained `base_model.pt`, and the trained `meta_model.pkl`.
-2. Run the test set through the base model to get its predictions and raw confidence (the MCP baseline).
-3. Extract features for the test set and run them through the meta-model to get the `trust_scores`. (We already have test features in `data/extracted/test_features.pt` but we'll also need the raw confidence scores for the baseline).
-4. Create a function that sorts the test predictions by their score, and progressively rejects the lowest scores (from 100% coverage down to 50% coverage).
-5. Plot two lines on a graph: 
-   - Selective Accuracy vs. Coverage using the Meta-Model Trust Score.
-   - Selective Accuracy vs. Coverage using the Raw Softmax Confidence (Baseline).
-6. Save the plot to an `outputs/plots/` directory as `risk_coverage.png`.
-
-## Expected Output
-
-You should see a graph where the x-axis is Coverage (100% down to 50%) and the y-axis is Accuracy. As coverage goes down, accuracy should climb. Ideally, your Meta-Model's line climbs faster and higher than the baseline!
-
-![alt text](image-3.png)
-
-## Why This Step Matters
-
-This proves the entire concept of the project! If the meta-model's line is higher than the raw confidence line, it means your meta-model is better at identifying when the base model is wrong than the base model itself. This validates the "second opinion" selective prediction approach.
+The meta-model needs to learn the patterns of when the base model is likely to be confused. By looking at the base model's internal embeddings and whether it ultimately got the answer right or wrong, the meta-model can predict "trust scores" for new, unseen data.
 
 ---
 
-# Step 6 - Build the Interactive Demo
+## ✅ Step 4 — Train the Meta-Model
 
-## Goal
+**Status:** Complete
 
-To make this project presentation-ready, we need to show individual examples of the Meta-Model in action. We will build a small demo script that pulls a few random test images and displays the image alongside the Main Model's guess and the Meta-Model's trust score.
+### Goal
 
-## What to Create
+Train a secondary model (the "meta-model" or "trust model") to predict whether the base model's classification is correct or incorrect, using a Gradient Boosting Classifier from `scikit-learn`.
 
-Create `src/demo.py` containing:
-1. Code to load a few random images from the test dataset.
-2. Run them through the `base_model` to get the prediction and raw confidence.
-3. Run their features through the `meta_model` to get the trust score.
-4. Use `matplotlib` to plot the image and print the results side-by-side. 
-   - We specifically want to highlight cases where the **base model is wrong, but the meta-model correctly gives it a low trust score** (meaning it successfully caught the error!).
+### What Was Created
 
-## Expected Output
+**`src/train_meta.py`** — loads the extracted calibration features, trains a `GradientBoostingClassifier` (100 estimators, seed 42), evaluates on the test set, and saves to `models/meta_model.pkl`.
 
-When you run the demo, it should pop up a visual showing the image, the true label, what the model guessed, and what the meta-model thought about that guess. 
+### Evaluation Results (Test Set)
 
-## Why This Step Matters
+| Metric | Value |
+|---|---|
+| Accuracy | 0.7556 |
+| Precision | 0.7706 |
+| Recall | 0.9590 |
+| F1 Score | 0.8545 |
+| ROC-AUC | 0.7717 |
 
-Metrics like ROC-AUC and Risk-Coverage curves are great for data scientists, but an interactive demo is how you get normal people (and recruiters!) to instantly understand why your project is valuable. It shows the "Second Opinion" AI doing its job in real-time.
+### Why This Step Matters
+
+This is the core of "Selective Prediction." This meta-model outputs a trust score between 0 and 1 for any new image. A high score means "trust the base model," a low score means "the base model is probably confused — defer to a human."
+
+---
+
+## ✅ Step 5 — Evaluate Selective Prediction (Risk-Coverage Curve)
+
+**Status:** Complete
+
+### Goal
+
+Compare the meta-model's trust scores against a simple baseline (raw softmax confidence / MCP) by plotting a **Risk-Coverage Curve** — showing that as we reject the "riskiest" predictions, accuracy on the remaining data increases.
+
+### What Was Created
+
+**`src/evaluate.py`** — loads both models, computes MCP scores and meta-model trust scores for the full test set, calculates selective accuracy at coverage levels from 100% down to 50%, and saves the plot to `outputs/plots/risk_coverage.png`.
+
+### Key Observations
+
+Both the meta-model and the baseline show the expected behavior: accuracy climbs as we reject more uncertain predictions. The baseline (MCP) currently outperforms the meta-model at most coverage levels.
+
+**Root cause:** The meta-model currently only receives raw 256-dim embeddings. The README's Step 4 specifies that it should also receive handcrafted uncertainty features like `max_softmax`, `entropy`, `top1_top2_margin`, `embedding_norm`, `embedding_mean`, `embedding_std`, and `predicted_class_id`. Adding these features is expected to close the gap and beat the MCP baseline.
+
+### Why This Step Matters
+
+This is the headline result of the project. If the meta-model's line is higher than the raw confidence line, it proves the "second opinion" approach is worth having. Currently this is a V1 — improving the feature set is the clear next step.
+
+---
+
+## ⬜ Step 6 — Build the Interactive Demo
+
+**Status:** Not started
+
+### Goal
+
+Build a presentation-ready demo script (`src/demo.py`) that shows individual examples of the meta-model in action: the image, the base model's prediction, its confidence, and the meta-model's trust score — highlighting cases where the base model is wrong but the meta-model correctly flags it.
+
+### Why This Step Matters
+
+Metrics like ROC-AUC and Risk-Coverage curves are great for data scientists, but an interactive demo is how you get normal people (and recruiters!) to instantly understand why the project is valuable.
+
+---
+
+## ⬜ Next Steps — Improving the Meta-Model
+
+To beat the MCP baseline, the following improvements are planned:
+
+1. **Enrich the feature set** — add `max_softmax`, `entropy`, `top1_top2_margin`, `embedding_norm`, `embedding_mean`, `embedding_std`, `predicted_class_id` to the features passed to the meta-model
+2. **Upgrade the base model** — swap SimpleCNN for ResNet-18 to get higher base accuracy (~93%)
+3. **Build the demo** — `src/demo.py` showing accept/defer decisions on sample images
+4. **Failure type breakdown** — categorize predictions into the four quadrants (high trust + correct, high trust + wrong, etc.)
