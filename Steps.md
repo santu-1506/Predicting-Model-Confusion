@@ -128,6 +128,33 @@ Create `src/extract_features.py` containing:
    - A binary label `is_correct` (1 if the base model's prediction was right, 0 if wrong).
 4. Save the extracted features and labels into a format suitable for training the meta-model (e.g., NumPy `.npy` files or PyTorch `.pt` files in a `data/extracted/` directory).
 
+![alt text](image-1.png)
+
 ## Why This Step Matters
 
 The meta-model needs to learn the patterns of when the base model is likely to be confused. By looking at the base model's internal embeddings and whether it ultimately got the answer right or wrong on the calibration set, the meta-model can predict "trust scores" for new, unseen data in the test set.
+
+---
+
+# Step 4 - Train the Meta-Model
+
+## Goal
+
+Train a secondary model (the "meta-model" or "trust model") to predict whether the base model's classification is correct or incorrect. We will use a Gradient Boosting Classifier from `scikit-learn` to learn from the internal features we extracted in Step 3.
+
+## What to Create
+
+Create `src/train_meta.py` containing:
+1. Code to load the extracted features and labels from the `data/extracted/` directory (specifically the `calibration` set).
+2. Initialization of a `GradientBoostingClassifier` (or `RandomForestClassifier`).
+3. Training the classifier on the calibration features, with the target being the `is_correct` labels.
+4. Evaluation of the meta-model on the test features (to see how well it predicts the base model's successes and failures on unseen data).
+5. Saving the trained meta-model weights to `models/meta_model.pkl` using `joblib`.
+
+## Expected Output
+
+When you run this step, you should see the training process for the Gradient Boosting model and some basic metrics (like Accuracy and ROC-AUC) on the test set.
+
+## Why This Step Matters
+
+This is the core of "Selective Prediction". This meta-model will output a "trust score" between 0 and 1 for any new image. A high score means "trust the base model," while a low score means "the base model is probably confused, defer to a human."
