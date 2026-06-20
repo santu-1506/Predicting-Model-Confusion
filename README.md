@@ -48,23 +48,37 @@ This is part of a broader idea called **selective prediction** (sometimes called
 
 | Metric | Value |
 |---|---|
-| **Base Model Accuracy** | 71.44% (10 epochs, SimpleCNN) |
-| **Meta-Model Accuracy** | 75.56% |
-| **Meta-Model ROC-AUC** | 0.7717 |
-| **Meta-Model F1 Score** | 0.8545 |
+| **Base Model Accuracy** | 74.84% (10 epochs, SimpleCNN) |
+| **Meta-Model (RandomForest)** | 78.30% accuracy |
+| **Meta-Model ROC-AUC** | 0.8310 |
+| **Meta-Model F1 Score** | 0.8639 |
+| **Meta-Model Features** | 263 (7 handcrafted + 256 embedding) |
+
+### Base Model Training
+
+![Training Curve](assets/training_curve.png)
+
+### Meta-Model Features
+
+![Feature Table](assets/feature_table.png)
+
+### Meta-Model Comparison
+
+![Meta-Model Comparison](assets/meta_model_comparison.png)
 
 ### Risk-Coverage Curve
 
-The headline result — as we reject the riskiest predictions (lowest trust scores), accuracy on the remaining predictions climbs steadily:
+The headline result — as we reject the riskiest predictions (lowest trust scores), accuracy on the remaining predictions climbs. **The meta-model outperforms the raw softmax confidence baseline** at coverage levels below ~75%, proving the "second opinion" approach works:
 
-| Coverage | Meaning | Approx. Accuracy |
-|---|---|---|
-| 100% | Accept all predictions | ~75% |
-| 80% | Reject riskiest 20% | ~80% |
-| 60% | Reject riskiest 40% | ~88% |
-| 50% | Reject riskiest 50% | ~90% |
+![Risk-Coverage Curve](assets/risk_coverage.png)
 
-> **Note:** The current meta-model uses only raw embeddings as features. Adding handcrafted uncertainty signals (softmax confidence, entropy, margin) is expected to significantly improve performance over the MCP baseline. See [Future Improvements](#-future-improvements) below.
+| Coverage | Meaning | Meta-Model Accuracy | Baseline (MCP) |
+|---|---|---|---|
+| 100% | Accept all predictions | ~75% | ~75% |
+| 80% | Reject riskiest 20% | ~82% | ~82% |
+| 70% | Reject riskiest 30% | ~88% | ~86% |
+| 60% | Reject riskiest 40% | ~92% | ~90% |
+| 50% | Reject riskiest 50% | **~94%** | ~91% |
 
 ---
 
@@ -177,12 +191,13 @@ The paper reports **AUROC of 90–94** on CIFAR-10 with IAD networks. This proje
 
 ## 🔮 Future Improvements
 
-- [ ] **Richer meta-model features:** Add `max_softmax`, `entropy`, `top1_top2_margin`, `embedding_norm`, `embedding_mean`, `embedding_std`, and `predicted_class_id` alongside raw embeddings
-- [ ] **Upgrade base model:** Replace SimpleCNN with ResNet-18 for higher base accuracy
+- [x] ~~**Richer meta-model features:** Add handcrafted uncertainty signals alongside raw embeddings~~ ✅ Done
+- [ ] **Upgrade base model:** Replace SimpleCNN with ResNet-18 for higher base accuracy (~93%)
 - [ ] **Dirichlet base model:** Implement IAD-style training for better uncertainty separation
 - [ ] **Monte Carlo Dropout:** Use dropout at inference time for variance-based uncertainty
 - [ ] **Interactive demo:** Build `demo.py` showing accept/defer decisions on sample images
 - [ ] **Confusion matrix visualization:** Show which class pairs confuse the model most
+- [ ] **Failure type breakdown:** Categorize predictions into four quadrants (high trust + correct, high trust + wrong, etc.)
 
 ---
 

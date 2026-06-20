@@ -28,17 +28,26 @@ class SimpleCNN(nn.Module):
         )
 
     def forward(self, x, return_embedding=False):
-        embedding = self.features(x)
-        embedding_flat = nn.Flatten()(embedding)
-        logits = self.classifier(embedding_flat.view(embedding_flat.size(0), -1, 1, 1) if False else embedding)
+        """
+        Forward pass through the CNN.
         
-        # We also want to support returning the embedding for Step 4
-        # Since Step 4 needs second-to-last-layer embedding, we extract the representation before the final Linear layer
+        Args:
+            x: Input tensor of shape (batch, 3, 32, 32)
+            return_embedding: If True, also return the 256-dim hidden layer activation
+            
+        Returns:
+            logits: Class logits of shape (batch, num_classes)
+            hidden (optional): 256-dim embedding from second-to-last layer
+        """
+        # Extract convolutional features
         features_out = self.features(x)
         flat = torch.flatten(features_out, 1)
-        hidden = self.classifier[1](flat)
-        hidden = self.classifier[2](hidden)
-        logits = self.classifier[4](self.classifier[3](hidden))
+        
+        # Walk through the classifier layers manually to grab the hidden embedding
+        # classifier = [Flatten(0), Linear(1), ReLU(2), Dropout(3), Linear(4)]
+        hidden = self.classifier[1](flat)   # Linear(2048 -> 256)
+        hidden = self.classifier[2](hidden) # ReLU
+        logits = self.classifier[4](self.classifier[3](hidden))  # Dropout -> Linear(256 -> 10)
         
         if return_embedding:
             return logits, hidden
