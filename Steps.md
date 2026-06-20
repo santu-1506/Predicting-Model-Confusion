@@ -93,3 +93,41 @@ Test images: 10000
 ## Why This Step Matters
 
 The calibration set is used later to teach the meta-model when the base model is likely to be correct or wrong. If the base model trains on the calibration set, the meta-model will learn from unrealistic results and the final trust score will not be reliable.
+
+---
+
+# Step 2 - Train the Base Model
+
+## Goal
+
+Train a small CNN base model exclusively on the `base_train` dataset. The base model must never see the `calibration` or `test` datasets during training.
+
+## What to Create
+
+Create `src/train_base.py` containing:
+1. A basic CNN architecture for CIFAR-10 (e.g., 2-3 conv layers, followed by fully connected layers).
+2. A training loop that runs for a few epochs (e.g., 10 epochs).
+3. Code to save the trained model weights to `models/base_model.pt`.
+![alt text](image.png)
+
+---
+
+# Step 3 - Extract Features & Generate Meta-Model Data
+
+## Goal
+
+Run the trained base model on the `calibration` and `test` datasets to see where it succeeds and where it fails. We will extract its internal features (embeddings) and record whether its predictions were correct or incorrect. This information will form the dataset used to train our trust/meta-model.
+
+## What to Create
+
+Create `src/extract_features.py` containing:
+1. Code to load the trained `models/base_model.pt`.
+2. A function that runs the model over the `calibration` and `test` dataloaders.
+3. For each image, save:
+   - The intermediate features/embeddings from the base model (e.g., from the second-to-last layer).
+   - A binary label `is_correct` (1 if the base model's prediction was right, 0 if wrong).
+4. Save the extracted features and labels into a format suitable for training the meta-model (e.g., NumPy `.npy` files or PyTorch `.pt` files in a `data/extracted/` directory).
+
+## Why This Step Matters
+
+The meta-model needs to learn the patterns of when the base model is likely to be confused. By looking at the base model's internal embeddings and whether it ultimately got the answer right or wrong on the calibration set, the meta-model can predict "trust scores" for new, unseen data in the test set.
