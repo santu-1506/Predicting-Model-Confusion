@@ -192,12 +192,12 @@ The paper reports **AUROC of 90–94** on CIFAR-10 with IAD networks. This proje
 ## 🔮 Future Improvements
 
 - [x] ~~**Richer meta-model features:** Add handcrafted uncertainty signals alongside raw embeddings~~ ✅ Done
+- [x] ~~**Interactive demo:** Build `demo.py` showing accept/defer decisions on sample images~~ ✅ Done
+- [x] ~~**Failure type breakdown:** Categorize predictions into four quadrants (high trust + correct, etc.)~~ ✅ Done
 - [ ] **Upgrade base model:** Replace SimpleCNN with ResNet-18 for higher base accuracy (~93%)
 - [ ] **Dirichlet base model:** Implement IAD-style training for better uncertainty separation
 - [ ] **Monte Carlo Dropout:** Use dropout at inference time for variance-based uncertainty
-- [ ] **Interactive demo:** Build `demo.py` showing accept/defer decisions on sample images
 - [ ] **Confusion matrix visualization:** Show which class pairs confuse the model most
-- [ ] **Failure type breakdown:** Categorize predictions into four quadrants (high trust + correct, high trust + wrong, etc.)
 
 ---
 
