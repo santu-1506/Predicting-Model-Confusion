@@ -160,3 +160,59 @@ When you run this step, you should see the training process for the Gradient Boo
 ## Why This Step Matters
 
 This is the core of "Selective Prediction". This meta-model will output a "trust score" between 0 and 1 for any new image. A high score means "trust the base model," while a low score means "the base model is probably confused, defer to a human."
+
+---
+
+# Step 5 - Evaluate Selective Prediction (Risk-Coverage Curve)
+
+## Goal
+
+Now that we have a trained meta-model that predicts "trust scores," we need to prove that it actually works. We will compare our meta-model's trust scores against a simple baseline (raw softmax confidence, also known as Maximum Class Probability or MCP). 
+The headline result will be a **Risk-Coverage Curve**: a plot showing that as we reject the "riskiest" predictions (according to our trust score), the accuracy of the remaining predictions increases!
+
+## What to Create
+
+Create `src/evaluate.py` containing:
+1. Code to load the `test` dataset, the trained `base_model.pt`, and the trained `meta_model.pkl`.
+2. Run the test set through the base model to get its predictions and raw confidence (the MCP baseline).
+3. Extract features for the test set and run them through the meta-model to get the `trust_scores`. (We already have test features in `data/extracted/test_features.pt` but we'll also need the raw confidence scores for the baseline).
+4. Create a function that sorts the test predictions by their score, and progressively rejects the lowest scores (from 100% coverage down to 50% coverage).
+5. Plot two lines on a graph: 
+   - Selective Accuracy vs. Coverage using the Meta-Model Trust Score.
+   - Selective Accuracy vs. Coverage using the Raw Softmax Confidence (Baseline).
+6. Save the plot to an `outputs/plots/` directory as `risk_coverage.png`.
+
+## Expected Output
+
+You should see a graph where the x-axis is Coverage (100% down to 50%) and the y-axis is Accuracy. As coverage goes down, accuracy should climb. Ideally, your Meta-Model's line climbs faster and higher than the baseline!
+
+![alt text](image-3.png)
+
+## Why This Step Matters
+
+This proves the entire concept of the project! If the meta-model's line is higher than the raw confidence line, it means your meta-model is better at identifying when the base model is wrong than the base model itself. This validates the "second opinion" selective prediction approach.
+
+---
+
+# Step 6 - Build the Interactive Demo
+
+## Goal
+
+To make this project presentation-ready, we need to show individual examples of the Meta-Model in action. We will build a small demo script that pulls a few random test images and displays the image alongside the Main Model's guess and the Meta-Model's trust score.
+
+## What to Create
+
+Create `src/demo.py` containing:
+1. Code to load a few random images from the test dataset.
+2. Run them through the `base_model` to get the prediction and raw confidence.
+3. Run their features through the `meta_model` to get the trust score.
+4. Use `matplotlib` to plot the image and print the results side-by-side. 
+   - We specifically want to highlight cases where the **base model is wrong, but the meta-model correctly gives it a low trust score** (meaning it successfully caught the error!).
+
+## Expected Output
+
+When you run the demo, it should pop up a visual showing the image, the true label, what the model guessed, and what the meta-model thought about that guess. 
+
+## Why This Step Matters
+
+Metrics like ROC-AUC and Risk-Coverage curves are great for data scientists, but an interactive demo is how you get normal people (and recruiters!) to instantly understand why your project is valuable. It shows the "Second Opinion" AI doing its job in real-time.
